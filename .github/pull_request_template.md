@@ -14,7 +14,7 @@ Closes (GitHub issue number or Asana task link)
 As the author of this pull request, I verify that:
 
 - [ ] I have set the target branch to `master`.
-- [ ] I have detailed the purspose of this Pull Request in a non-technical way.
+- [ ] I have detailed the purpose of this Pull Request in a non-technical way.
 - [ ] I have detailed how to test the changes in the Pull Request.
 - [ ] I have detailed the functional tests required for approval.
 - [ ] I have performed a self-review of my code to ensure it is DRY and follows the team's coding standards.

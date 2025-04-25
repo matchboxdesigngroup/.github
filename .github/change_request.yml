@@ -1,0 +1,68 @@
+name: Change Request
+description: Request a change to existing functionality
+title: "[CHANGE] "
+labels: ["change"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a change. Please provide as much detail as possible to help us understand your request.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the change you want to request.
+      placeholder: What change would you like to see implemented?
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: Describe the current functionality that needs to be changed.
+      placeholder: How does it work currently?
+    validations:
+      required: true
+  - type: textarea
+    id: changes
+    attributes:
+      label: Proposed changes
+      description: Describe the specific changes you want to make.
+      placeholder: How would you like it to work instead?
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact
+      description: Select all areas that will be affected by this change.
+      options:
+        - label: Existing functionality
+          required: true
+        - label: User experience
+          required: true
+        - label: Performance
+        - label: Security
+  - type: textarea
+    id: migration
+    attributes:
+      label: Migration path
+      description: If applicable, describe how to migrate from the current implementation to the new one.
+      placeholder: What steps are needed to implement this change?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context or screenshots about the change request here.
+      placeholder: Include any relevant research, examples, or mockups.
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Select the priority level that best reflects the importance of this change.
+      options:
+        - "High"
+        - "Medium"
+        - "Low"
+    validations:
+      required: true

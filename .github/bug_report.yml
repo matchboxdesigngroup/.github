@@ -1,0 +1,103 @@
+name: Bug Report
+description: Create a report to help us improve
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please provide as much detail as possible to help us understand and reproduce the issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: What is happening and why is it a problem?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps needed to reproduce the issue.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen when following the steps above?
+      placeholder: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happens when following the steps above?
+      placeholder: A clear and concise description of what actually happened.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ## Environment
+        Please provide the following information:
+  - type: dropdown
+    id: wordpress-version
+    attributes:
+      label: WordPress Version
+      description: The version of WordPress you're using
+      options:
+        - "6.4.3"
+        - "6.4.2"
+        - "6.4.1"
+        - "6.4.0"
+        - "Other (please specify)"
+    validations:
+      required: true
+  - type: dropdown
+    id: php-version
+    attributes:
+      label: PHP Version
+      description: The version of PHP you're using
+      options:
+        - "8.2"
+        - "8.1"
+        - "8.0"
+        - "7.4"
+        - "Other (please specify)"
+    validations:
+      required: true
+  - type: input
+    id: theme-version
+    attributes:
+      label: Theme/Plugin Version
+      description: The version of the theme or plugin you're using
+      placeholder: e.g. 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: The browser you're using
+      options:
+        - "Chrome"
+        - "Firefox"
+        - "Safari"
+        - "Edge"
+        - "Other (please specify)"
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.
+      placeholder: Include any error messages, logs, or related issues.

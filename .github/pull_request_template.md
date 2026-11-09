@@ -38,7 +38,7 @@ Follow the steps below to test the changes in this PR.
 
 1. Deploy this branch to the `dev` environment.
 2. Navigate to...
-3. 
+3.
 
 ### Functional tests
 

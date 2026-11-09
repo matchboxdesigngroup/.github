@@ -1,0 +1,7 @@
+{
+  "name": "Matchbox Lint",
+  "description": "WordPress Coding Standards (PHPCS), markdownlint, ESLint/Stylelint and actionlint on every push.",
+  "iconName": "octicon checklist",
+  "categories": ["PHP", "JavaScript", "WordPress", "Code quality"],
+  "filePatterns": ["composer\\.json$", "package\\.json$", "\\.php$", "style\\.css$"]
+}

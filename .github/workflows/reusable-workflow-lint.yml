@@ -1,0 +1,40 @@
+##
+# Reusable workflow: lint GitHub Actions workflow files with actionlint.
+#
+# Modeled on WordPress core's reusable-workflow-lint.yml. actionlint checks
+# workflow syntax, expression types and shellchecks `run:` scripts.
+#
+# By default issues are reported but never fail the build (`fail-on-error: true` to enforce).
+##
+name: Workflow lint
+
+on:
+  workflow_call:
+    inputs:
+      fail-on-error:
+        description: 'Fail the job on actionlint issues. By default they are reported only.'
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Run actionlint
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        with:
+          args: '-color'

@@ -1,0 +1,314 @@
+##
+# Reusable workflow: MDG coding standards in a single job.
+#
+# One job keeps Actions minutes down: GitHub bills each job rounded up to a
+# whole minute, and each linter below only sets up its tools when the pull
+# request changed files it checks.
+#
+# - PHP: PHPCS with the full WordPress Coding Standards and PHPCompatibilityWP
+#   (modeled on WordPress core's reusable-coding-standards-php.yml). Uses the
+#   repository's phpcs config and composer PHPCS if it has them, else the MDG
+#   standard in standards/phpcs/MDG of this repository.
+# - Markdown: markdownlint-cli2. Uses the repository's config if it has one,
+#   else standards/markdownlint/.markdownlint-cli2.jsonc.
+# - JavaScript / CSS: the repository's own `lint:js` / `lint:css` npm scripts
+#   (@wordpress/scripts). Skipped when the scripts don't exist.
+# - Workflow files: actionlint on .github/workflows.
+#
+# By default only files changed by the pull request are checked, and issues are
+# reported as warnings that never fail the build (`fail-on-error: true` to enforce).
+##
+name: Lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Directory to lint, relative to the repository root (e.g. wp-content/themes/my-theme). Holds the phpcs config and package.json.'
+        type: string
+        default: '.'
+      scope:
+        description: "'changed' checks only files changed by the pull request; 'all' checks everything."
+        type: string
+        default: 'changed'
+      exclude-paths:
+        description: 'Regex of paths (relative to working-directory) to skip. Defaults to third-party plugins in a whole-site repo; set to an empty string to check them.'
+        type: string
+        default: '^wp-content/plugins/'
+      php-version:
+        description: 'PHP version to run PHPCS with.'
+        type: string
+        default: '8.3'
+      node-version:
+        description: 'Node.js version. Defaults to .nvmrc / .node-version in working-directory, else the current LTS.'
+        type: string
+        default: ''
+      js-script:
+        description: 'npm script that lints JavaScript.'
+        type: string
+        default: 'lint:js'
+      css-script:
+        description: 'npm script that lints CSS/SCSS.'
+        type: string
+        default: 'lint:css'
+      fail-on-error:
+        description: 'Fail the build on lint errors. By default all issues are reported as warnings only.'
+        type: boolean
+        default: false
+      standards-ref:
+        description: 'Ref of matchboxdesigngroup/.github to load the MDG standards and helper scripts from. Keep in step with the ref this workflow is called at.'
+        type: string
+        default: 'v1'
+
+permissions: {}
+
+env:
+  PUPPETEER_SKIP_DOWNLOAD: true
+
+jobs:
+  lint:
+    name: Coding standards
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history (without file contents) so changed files can be diffed.
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+          show-progress: false
+
+      - name: Checkout MDG standards
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: matchboxdesigngroup/.github
+          ref: ${{ inputs.standards-ref }}
+          path: .mdg-standards
+          persist-credentials: false
+          show-progress: false
+
+      - name: Move MDG standards out of the workspace
+        working-directory: .
+        run: mv .mdg-standards "${RUNNER_TEMP}/mdg-standards"
+
+      - name: Find files to check
+        id: files
+        env:
+          SCOPE: ${{ inputs.scope }}
+          EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          JS_SCRIPT: ${{ inputs.js-script }}
+          CSS_SCRIPT: ${{ inputs.css-script }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          changed_files="${RUNNER_TEMP}/mdg-standards/scripts/changed-files.sh"
+          count_lines() { grep -c . "$1" || true; }
+
+          # PHP: paths relative to working-directory.
+          php_list="${RUNNER_TEMP}/php-files.txt"
+          bash "$changed_files" 'php' "$SCOPE" "$EXCLUDE_PATHS" > "$php_list"
+          php_count="$(count_lines "$php_list")"
+
+          # Markdown: paths relative to the repository root, where the action runs.
+          prefix=""
+          if [[ "$WORKING_DIRECTORY" != "." ]]; then
+            prefix="${WORKING_DIRECTORY%/}/"
+          fi
+          md_list="${RUNNER_TEMP}/md-files.txt"
+          bash "$changed_files" 'md|markdown' "$SCOPE" "$EXCLUDE_PATHS" | sed "s|^|${prefix}|" > "$md_list"
+          md_count="$(count_lines "$md_list")"
+          # The project's markdownlint config if it has one (empty = the action finds it), else the MDG default.
+          md_config="${RUNNER_TEMP}/mdg-standards/standards/markdownlint/.markdownlint-cli2.jsonc"
+          for name in .markdownlint-cli2.jsonc .markdownlint-cli2.yaml .markdownlint-cli2.cjs .markdownlint-cli2.mjs \
+                      .markdownlint.jsonc .markdownlint.json .markdownlint.yaml .markdownlint.yml .markdownlint.cjs .markdownlint.mjs; do
+            if [[ -f "$name" || -f "${GITHUB_WORKSPACE}/${name}" ]]; then
+              md_config=""
+            fi
+          done
+
+          # JS/CSS: the npm scripts lint the whole project, so run them only
+          # when the pull request changed a file they cover.
+          has_script() {
+            [[ -f package.json ]] && jq -e --arg s "$1" '.scripts[$s] // empty' package.json > /dev/null
+          }
+          js=false; css=false
+          if has_script "$JS_SCRIPT" && [[ -n "$(bash "$changed_files" 'js|jsx|mjs|cjs|ts|tsx' "$SCOPE" "$EXCLUDE_PATHS")" ]]; then js=true; fi
+          if has_script "$CSS_SCRIPT" && [[ -n "$(bash "$changed_files" 'css|scss|sass' "$SCOPE" "$EXCLUDE_PATHS")" ]]; then css=true; fi
+          node_version="$NODE_VERSION"
+          if [[ -z "$node_version" && -f .nvmrc ]]; then node_version="$(tr -d '[:space:]' < .nvmrc)"; fi
+          if [[ -z "$node_version" && -f .node-version ]]; then node_version="$(tr -d '[:space:]' < .node-version)"; fi
+
+          # Workflow files live at the repository root.
+          workflows_count="$(cd "$GITHUB_WORKSPACE" && bash "$changed_files" 'ya?ml' "$SCOPE" | grep -c '^\.github/workflows/' || true)"
+
+          {
+            echo "php-count=${php_count}"
+            echo "php-list=${php_list}"
+            echo "md-count=${md_count}"
+            echo "md-config=${md_config}"
+            echo "md-globs<<MDG_EOF"
+            cat "$md_list"
+            echo "MDG_EOF"
+            echo "js=${js}"
+            echo "css=${css}"
+            echo "node-version=${node_version:-lts/*}"
+            echo "workflows-count=${workflows_count}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Files to lint"
+            echo "| Check | Runs |"
+            echo "| --- | --- |"
+            echo "| PHP | ${php_count} file(s) |"
+            echo "| Markdown | ${md_count} file(s) |"
+            echo "| JavaScript (\`${JS_SCRIPT}\`) | ${js} |"
+            echo "| CSS (\`${CSS_SCRIPT}\`) | ${css} |"
+            echo "| Workflow files | ${workflows_count} file(s) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PHP: ${php_count}, Markdown: ${md_count}, JS: ${js}, CSS: ${css}, workflows: ${workflows_count}"
+
+      # ---- PHP ----
+
+      - name: Set up PHP
+        if: steps.files.outputs.php-count != '0'
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          coverage: none
+          tools: composer, cs2pr
+
+      - name: Install PHPCS
+        id: install-phpcs
+        if: steps.files.outputs.php-count != '0'
+        run: |
+          uses_project_phpcs=false
+          if [[ -f composer.json ]] && jq -e '((.require // {}) + (.["require-dev"] // {})) | has("squizlabs/php_codesniffer") or has("wp-coding-standards/wpcs")' composer.json > /dev/null; then
+            uses_project_phpcs=true
+          fi
+
+          if [[ "$uses_project_phpcs" == "true" ]]; then
+            echo "Using the project's PHPCS from composer.json."
+            composer install --no-interaction --no-progress --prefer-dist
+            phpcs="${PWD}/vendor/bin/phpcs"
+          else
+            echo "Installing WordPress Coding Standards."
+            tools="${RUNNER_TEMP}/phpcs-tools"
+            mkdir -p "$tools"
+            echo '{}' > "${tools}/composer.json"
+            composer --working-dir="$tools" config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+            composer --working-dir="$tools" require --no-interaction --no-progress \
+              'wp-coding-standards/wpcs:^3.1' \
+              'phpcompatibility/phpcompatibility-wp:^2.1'
+            phpcs="${tools}/vendor/bin/phpcs"
+          fi
+
+          # Register the MDG standard alongside whatever standards are installed.
+          current="$("$phpcs" --config-show | sed -n 's/^installed_paths: *//p')"
+          "$phpcs" --config-set installed_paths "${current:+${current},}${RUNNER_TEMP}/mdg-standards/standards/phpcs"
+          "$phpcs" -i
+
+          echo "phpcs=${phpcs}" >> "$GITHUB_OUTPUT"
+
+      - name: Run PHPCS
+        id: phpcs
+        if: steps.files.outputs.php-count != '0'
+        env:
+          PHPCS: ${{ steps.install-phpcs.outputs.phpcs }}
+          FILE_LIST: ${{ steps.files.outputs.php-list }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          args=(
+            --report-full
+            "--report-checkstyle=${RUNNER_TEMP}/phpcs-report.xml"
+            "--basepath=${GITHUB_WORKSPACE}"
+          )
+
+          if [[ -f .phpcs.xml || -f phpcs.xml || -f .phpcs.xml.dist || -f phpcs.xml.dist ]]; then
+            echo "Using the project's phpcs config."
+          else
+            echo "No phpcs config found; using the MDG standard."
+            args+=(--standard=MDG)
+          fi
+
+          # Warnings never fail the build; errors only when fail-on-error is set.
+          args+=(--runtime-set ignore_warnings_on_exit 1)
+          if [[ "$FAIL_ON_ERROR" != "true" ]]; then
+            args+=(--runtime-set ignore_errors_on_exit 1)
+          fi
+
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "$FILE_LIST"
+          "$PHPCS" "${args[@]}" "${files[@]}"
+
+      - name: Annotate PHPCS results
+        if: ${{ always() && (steps.phpcs.outcome == 'success' || steps.phpcs.outcome == 'failure') }}
+        env:
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then
+            cs2pr --graceful-warnings "${RUNNER_TEMP}/phpcs-report.xml"
+          else
+            cs2pr --graceful-warnings --errors-as-warnings "${RUNNER_TEMP}/phpcs-report.xml"
+          fi
+
+      # ---- Markdown ----
+
+      - name: Run markdownlint
+        if: ${{ !cancelled() && steps.files.outputs.md-count != '0' }}
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
+        with:
+          globs: ${{ steps.files.outputs.md-globs }}
+          config: ${{ steps.files.outputs.md-config }}
+
+      # ---- JavaScript / CSS ----
+
+      - name: Set up Node.js
+        if: ${{ !cancelled() && (steps.files.outputs.js == 'true' || steps.files.outputs.css == 'true') }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.files.outputs.node-version }}
+
+      - name: Install npm dependencies
+        id: npm-install
+        if: ${{ !cancelled() && (steps.files.outputs.js == 'true' || steps.files.outputs.css == 'true') }}
+        # Install scripts aren't needed for linting and are a supply-chain risk.
+        run: |
+          if [[ -f package-lock.json ]]; then
+            npm ci --ignore-scripts --no-audit --no-fund
+          else
+            npm install --ignore-scripts --no-audit --no-fund
+          fi
+
+      - name: Lint JavaScript
+        if: ${{ !cancelled() && steps.npm-install.outcome == 'success' && steps.files.outputs.js == 'true' }}
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        env:
+          SCRIPT: ${{ inputs.js-script }}
+        run: npm run "$SCRIPT"
+
+      - name: Lint CSS
+        if: ${{ !cancelled() && steps.npm-install.outcome == 'success' && steps.files.outputs.css == 'true' }}
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        env:
+          SCRIPT: ${{ inputs.css-script }}
+        run: npm run "$SCRIPT"
+
+      # ---- Workflow files ----
+
+      - name: Run actionlint
+        if: ${{ !cancelled() && steps.files.outputs.workflows-count != '0' }}
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        with:
+          args: '-color'

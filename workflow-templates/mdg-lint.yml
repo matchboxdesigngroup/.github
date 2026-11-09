@@ -15,27 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  php:
-    name: PHP
-    uses: matchboxdesigngroup/.github/.github/workflows/reusable-phpcs.yml@v1
+  lint:
+    name: Lint
+    uses: matchboxdesigngroup/.github/.github/workflows/reusable-lint.yml@v1
     with:
       # Point at the theme or plugin for whole-site repos, e.g. wp-content/themes/my-theme
       working-directory: .
       # Manual runs (Actions > Lint > Run workflow) check every file; pull requests only changed files.
       scope: ${{ github.event_name == 'workflow_dispatch' && 'all' || 'changed' }}
-
-  markdown:
-    name: Markdown
-    uses: matchboxdesigngroup/.github/.github/workflows/reusable-markdownlint.yml@v1
-    with:
-      scope: ${{ github.event_name == 'workflow_dispatch' && 'all' || 'changed' }}
-
-  js-css:
-    name: JS/CSS
-    uses: matchboxdesigngroup/.github/.github/workflows/reusable-js-css-lint.yml@v1
-    with:
-      working-directory: .
-
-  workflows:
-    name: Workflows
-    uses: matchboxdesigngroup/.github/.github/workflows/reusable-workflow-lint.yml@v1

@@ -1,0 +1,12 @@
+{
+	"name": "mdg-markdownlint",
+	"private": true,
+	"description": "Runs markdownlint-cli2 and reports issues as GitHub annotations. Used by .github/workflows/reusable-lint.yml.",
+	"type": "module",
+	"engines": {
+		"node": ">=22"
+	},
+	"dependencies": {
+		"markdownlint-cli2": "0.24.0"
+	}
+}

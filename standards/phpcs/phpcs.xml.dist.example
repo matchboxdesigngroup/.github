@@ -1,7 +1,9 @@
 <?xml version="1.0"?>
 <!--
 Copy to phpcs.xml.dist in a theme or plugin and fill in the project values.
-The org lint workflow makes the MDG standard available to PHPCS.
+The org lint workflow makes the MDG standard available to PHPCS. To run PHPCS
+locally, install the standard with Composer: see "Run PHPCS locally" in
+https://github.com/matchboxdesigngroup/.github#linting
 -->
 <ruleset name="Project">
 	<description>Project coding standards.</description>

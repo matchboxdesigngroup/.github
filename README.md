@@ -15,11 +15,11 @@ A shared lint workflow that Matchbox repositories opt in to. It runs on pull req
 | Check | Tool | Config used |
 | --- | --- | --- |
 | PHP | The full [WordPress Coding Standards](https://github.com/WordPress/WordPress-Coding-Standards) and PHP 8.1+ compatibility (PHPCS) | The repo's `phpcs.xml(.dist)` / `.phpcs.xml(.dist)`, else the [MDG standard](standards/phpcs/MDG/ruleset.xml) |
-| Markdown | [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2-action) | The repo's markdownlint config, else the [MDG default](standards/markdownlint/.markdownlint-cli2.jsonc) |
+| Markdown | David Anson's [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) | The repo's markdownlint config, else the [MDG default](standards/markdownlint/.markdownlint-cli2.jsonc) |
 | JavaScript / CSS | The repo's `lint:js` and `lint:css` npm scripts (`wp-scripts lint-js` / `lint-style`) | The repo's ESLint/Stylelint config, e.g. the [MDG Stylelint config](standards/stylelint/.stylelintrc.json); skipped if the scripts don't exist |
 | Workflow files | [actionlint](https://github.com/rhysd/actionlint) | — |
 
-Each check only runs, and only installs its tools, when the pull request changed files it covers. PHP and Markdown checks look only at the changed files, so existing code isn't flagged. Run the workflow manually (**Actions → Lint → Run workflow**) to check every file. To make lint errors fail the build, pass `fail-on-error: true`.
+Every check reports issues the same way: as warning annotations on the changed lines. Each check only runs, and only installs its tools, when the pull request changed files it covers. PHP and Markdown checks look only at the changed files, so existing code isn't flagged. Run the workflow manually (**Actions → Lint → Run workflow**) to check every file. To make lint errors fail the build, pass `fail-on-error: true`; error-level issues are then reported as errors.
 
 The checks share one job to save Actions minutes: GitHub bills each job rounded up to a whole minute, and in private repositories those minutes come out of the plan's monthly allowance. A typical run is 1–2 minutes, or 2–4 when the npm lint scripts run.
 
@@ -32,6 +32,26 @@ The checks share one job to save Actions minutes: GitHub bills each job rounded 
 ### Project PHPCS config
 
 To set a text domain and prefix, copy [`standards/phpcs/phpcs.xml.dist.example`](standards/phpcs/phpcs.xml.dist.example) to `phpcs.xml.dist` in the theme or plugin. It builds on the MDG standard with `<rule ref="MDG"/>`.
+
+The workflow installs PHPCS and the MDG standard on its own, without the project's Composer dependencies, so premium plugins or private packages that need credentials don't matter. If the project's phpcs config needs standards beyond MDG, pass `use-project-phpcs: true` to run `composer install` in the project and use its PHPCS instead.
+
+### Run PHPCS locally
+
+This repository is also a Composer package, `matchboxdesigngroup/coding-standards`, so local PHPCS and editor integrations use the same MDG standard as the workflow. In the theme or plugin:
+
+```bash
+composer config repositories.mdg-standards vcs https://github.com/matchboxdesigngroup/.github
+```
+
+```bash
+composer config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+```
+
+```bash
+composer require --dev "matchboxdesigngroup/coding-standards:^1" dealerdirect/phpcodesniffer-composer-installer
+```
+
+Then run `vendor/bin/phpcs`, or point your editor at it. `^1` follows the `v1` tag; run `composer update matchboxdesigngroup/coding-standards` to pick up changes.
 
 ### Project Stylelint config
 

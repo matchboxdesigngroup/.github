@@ -6,17 +6,20 @@
 # request changed files it checks.
 #
 # - PHP: PHPCS with the full WordPress Coding Standards and PHPCompatibilityWP
-#   (modeled on WordPress core's reusable-coding-standards-php.yml). Uses the
-#   repository's phpcs config and composer PHPCS if it has them, else the MDG
-#   standard in standards/phpcs/MDG of this repository.
+#   (modeled on WordPress core's reusable-coding-standards-php.yml), installed
+#   on its own from this repository's composer.json, so the project's Composer
+#   dependencies (premium plugins, private packages) are never installed. Uses
+#   the repository's phpcs config if it has one, else the MDG standard.
 # - Markdown: markdownlint-cli2. Uses the repository's config if it has one,
 #   else standards/markdownlint/.markdownlint-cli2.jsonc.
 # - JavaScript / CSS: the repository's own `lint:js` / `lint:css` npm scripts
 #   (@wordpress/scripts). Skipped when the scripts don't exist.
 # - Workflow files: actionlint on .github/workflows.
 #
-# By default only files changed by the pull request are checked, and issues are
-# reported as warnings that never fail the build (`fail-on-error: true` to enforce).
+# By default only files changed by the pull request are checked. Every linter
+# reports issues the same way: as warning annotations on the changed lines that
+# never fail the build. With `fail-on-error: true`, error-level issues are
+# reported as errors and fail the build.
 ##
 name: Lint
 
@@ -39,6 +42,10 @@ on:
         description: 'PHP version to run PHPCS with.'
         type: string
         default: '8.3'
+      use-project-phpcs:
+        description: "Run `composer install` in working-directory and use the project's own PHPCS, for a project whose phpcs config needs standards beyond MDG. Needs every Composer dependency to install without credentials."
+        type: boolean
+        default: false
       node-version:
         description: 'Node.js version. Defaults to .nvmrc / .node-version in working-directory, else the current LTS.'
         type: string
@@ -156,9 +163,7 @@ jobs:
             echo "php-list=${php_list}"
             echo "md-count=${md_count}"
             echo "md-config=${md_config}"
-            echo "md-globs<<MDG_EOF"
-            cat "$md_list"
-            echo "MDG_EOF"
+            echo "md-list=${md_list}"
             echo "js=${js}"
             echo "css=${css}"
             echo "node-version=${node_version:-lts/*}"
@@ -190,31 +195,25 @@ jobs:
       - name: Install PHPCS
         id: install-phpcs
         if: steps.files.outputs.php-count != '0'
+        env:
+          USE_PROJECT_PHPCS: ${{ inputs.use-project-phpcs }}
         run: |
-          uses_project_phpcs=false
-          if [[ -f composer.json ]] && jq -e '((.require // {}) + (.["require-dev"] // {})) | has("squizlabs/php_codesniffer") or has("wp-coding-standards/wpcs")' composer.json > /dev/null; then
-            uses_project_phpcs=true
-          fi
-
-          if [[ "$uses_project_phpcs" == "true" ]]; then
-            echo "Using the project's PHPCS from composer.json."
+          mdg="${RUNNER_TEMP}/mdg-standards"
+          if [[ "$USE_PROJECT_PHPCS" == "true" ]]; then
+            echo "Using the project's PHPCS (use-project-phpcs)."
             composer install --no-interaction --no-progress --prefer-dist
             phpcs="${PWD}/vendor/bin/phpcs"
+            # Register the MDG standard unless the project already installs it.
+            if ! "$phpcs" -i | grep -qw MDG; then
+              current="$("$phpcs" --config-show | sed -n 's/^installed_paths: *//p')"
+              "$phpcs" --config-set installed_paths "${current:+${current},}${mdg}/standards/phpcs"
+            fi
           else
-            echo "Installing WordPress Coding Standards."
-            tools="${RUNNER_TEMP}/phpcs-tools"
-            mkdir -p "$tools"
-            echo '{}' > "${tools}/composer.json"
-            composer --working-dir="$tools" config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
-            composer --working-dir="$tools" require --no-interaction --no-progress \
-              'wp-coding-standards/wpcs:^3.1' \
-              'phpcompatibility/phpcompatibility-wp:^2.1'
-            phpcs="${tools}/vendor/bin/phpcs"
+            # Isolated from the project's Composer dependencies, which may need credentials.
+            echo "Installing the MDG standard from matchboxdesigngroup/.github's composer.json."
+            composer --working-dir="$mdg" update --no-interaction --no-progress --prefer-dist
+            phpcs="${mdg}/vendor/bin/phpcs"
           fi
-
-          # Register the MDG standard alongside whatever standards are installed.
-          current="$("$phpcs" --config-show | sed -n 's/^installed_paths: *//p')"
-          "$phpcs" --config-set installed_paths "${current:+${current},}${RUNNER_TEMP}/mdg-standards/standards/phpcs"
           "$phpcs" -i
 
           echo "phpcs=${phpcs}" >> "$GITHUB_OUTPUT"
@@ -222,6 +221,9 @@ jobs:
       - name: Run PHPCS
         id: phpcs
         if: steps.files.outputs.php-count != '0'
+        # Lint issues never fail this step (see ignore_*_on_exit below); this only
+        # keeps a PHPCS crash, such as a config error, from failing the build.
+        continue-on-error: ${{ !inputs.fail-on-error }}
         env:
           PHPCS: ${{ steps.install-phpcs.outputs.phpcs }}
           FILE_LIST: ${{ steps.files.outputs.php-list }}
@@ -255,29 +257,58 @@ jobs:
         env:
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         run: |
+          report="${RUNNER_TEMP}/phpcs-report.xml"
+          if [[ ! -s "$report" ]]; then
+            echo "::warning title=phpcs::PHPCS didn't produce a report, so it may not have run. See the Run PHPCS step log."
+            [[ "$FAIL_ON_ERROR" == "true" ]] && exit 1
+            exit 0
+          fi
           if [[ "$FAIL_ON_ERROR" == "true" ]]; then
-            cs2pr --graceful-warnings "${RUNNER_TEMP}/phpcs-report.xml"
+            cs2pr --graceful-warnings "$report"
           else
-            cs2pr --graceful-warnings --errors-as-warnings "${RUNNER_TEMP}/phpcs-report.xml"
+            cs2pr --graceful-warnings --errors-as-warnings "$report"
           fi
 
       # ---- Markdown ----
+      # markdownlint-cli2 runs through scripts/markdownlint so its issues are
+      # reported like every other check (the action reports them all as errors).
+
+      - name: Set up Node.js for markdownlint
+        if: ${{ !cancelled() && steps.files.outputs.md-count != '0' }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
 
       - name: Run markdownlint
         if: ${{ !cancelled() && steps.files.outputs.md-count != '0' }}
         continue-on-error: ${{ !inputs.fail-on-error }}
-        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
-        with:
-          globs: ${{ steps.files.outputs.md-globs }}
-          config: ${{ steps.files.outputs.md-config }}
+        # Paths in the file list are relative to the repository root.
+        working-directory: .
+        env:
+          FILE_LIST: ${{ steps.files.outputs.md-list }}
+          CONFIG: ${{ steps.files.outputs.md-config }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          tool="${RUNNER_TEMP}/mdg-standards/scripts/markdownlint"
+          npm ci --prefix "$tool" --ignore-scripts --no-audit --no-fund --loglevel=error
+
+          args=()
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then args+=(--fail-on-error); fi
+          if [[ -n "$CONFIG" ]]; then args+=(--config "$CONFIG"); fi
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "$FILE_LIST"
+          node "${tool}/markdownlint.mjs" "${args[@]}" "${files[@]}"
 
       # ---- JavaScript / CSS ----
+      # The npm scripts write JSON reports, which scripts/annotate.mjs turns into annotations.
 
       - name: Set up Node.js
         if: ${{ !cancelled() && (steps.files.outputs.js == 'true' || steps.files.outputs.css == 'true') }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.files.outputs.node-version }}
+          package-manager-cache: false
 
       - name: Install npm dependencies
         id: npm-install
@@ -295,20 +326,47 @@ jobs:
         continue-on-error: ${{ !inputs.fail-on-error }}
         env:
           SCRIPT: ${{ inputs.js-script }}
-        run: npm run "$SCRIPT"
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          report="${RUNNER_TEMP}/eslint.json"
+          npm run "$SCRIPT" -- --format json --output-file "$report" || echo "npm run ${SCRIPT} exited with $?."
+          flags=()
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then flags+=(--fail-on-error); fi
+          node "${RUNNER_TEMP}/mdg-standards/scripts/annotate.mjs" eslint "$report" "${flags[@]}"
 
       - name: Lint CSS
         if: ${{ !cancelled() && steps.npm-install.outcome == 'success' && steps.files.outputs.css == 'true' }}
         continue-on-error: ${{ !inputs.fail-on-error }}
         env:
           SCRIPT: ${{ inputs.css-script }}
-        run: npm run "$SCRIPT"
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          report="${RUNNER_TEMP}/stylelint.json"
+          npm run "$SCRIPT" -- --formatter json --output-file "$report" || echo "npm run ${SCRIPT} exited with $?."
+          flags=()
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then flags+=(--fail-on-error); fi
+          node "${RUNNER_TEMP}/mdg-standards/scripts/annotate.mjs" stylelint "$report" "${flags[@]}"
 
       # ---- Workflow files ----
 
       - name: Run actionlint
         if: ${{ !cancelled() && steps.files.outputs.workflows-count != '0' }}
         continue-on-error: ${{ !inputs.fail-on-error }}
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
-        with:
-          args: '-color'
+        working-directory: .
+        env:
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          report="${RUNNER_TEMP}/actionlint.json"
+          code=0
+          # rhysd/actionlint v1.7.12
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -format '{{json .}}' > "$report" || code=$?
+          # actionlint exits 1 when it finds issues and higher when it can't run.
+          if (( code > 1 )); then
+            echo "::warning title=actionlint::actionlint failed to run (exit ${code}). See the step log."
+            exit "$code"
+          fi
+          flags=()
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then flags+=(--fail-on-error); fi
+          node "${RUNNER_TEMP}/mdg-standards/scripts/annotate.mjs" actionlint "$report" "${flags[@]}"

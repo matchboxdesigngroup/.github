@@ -1,0 +1,27 @@
+# Matchbox lint: PHP (WordPress, Sage or Laravel standards), Markdown, JS/TS/CSS and workflow files.
+# Issues show as annotations on the pull request; they don't fail the build.
+# Docs: https://github.com/matchboxdesigngroup/.github#linting
+name: Lint
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    uses: matchboxdesigngroup/.github/.github/workflows/reusable-lint.yml@v1
+    with:
+      # Point at the theme or plugin for whole-site repos, e.g. wp-content/themes/my-theme
+      working-directory: .
+      # The repo's stack: wordpress, sage, laravel, none, or auto (only what the project has configured).
+      php-standard: auto
+      # Manual runs (Actions > Lint > Run workflow) check every file; pull requests only changed files.
+      scope: ${{ github.event_name == 'workflow_dispatch' && 'all' || 'changed' }}

@@ -1,0 +1,50 @@
+{
+	"extends": [
+		"@wordpress/stylelint-config/scss-stylistic"
+	],
+	"plugins": [
+		"stylelint-order"
+	],
+	"reportDescriptionlessDisables": true,
+	"rules": {
+		"order/properties-alphabetical-order": true,
+		"declaration-no-important": true,
+		"declaration-block-no-redundant-longhand-properties": true,
+		"shorthand-property-no-redundant-values": true,
+		"color-named": null,
+		"at-rule-empty-line-before": [
+			"always",
+			{
+				"except": [
+					"blockless-after-blockless",
+					"first-nested"
+				],
+				"ignore": [
+					"after-comment"
+				],
+				"ignoreAtRules": [
+					"else"
+				]
+			}
+		],
+		"scss/at-rule-no-unknown": [
+			true,
+			{
+				"ignoreAtRules": [
+					"tailwind",
+					"apply",
+					"layer",
+					"config",
+					"screen",
+					"theme",
+					"utility",
+					"variant",
+					"custom-variant",
+					"source",
+					"plugin",
+					"reference"
+				]
+			}
+		]
+	}
+}

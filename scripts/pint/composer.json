@@ -1,0 +1,8 @@
+{
+	"name": "matchboxdesigngroup/lint-pint",
+	"description": "Laravel Pint for the org lint workflow, installed apart from the project's Composer dependencies.",
+	"type": "project",
+	"require": {
+		"laravel/pint": "^1.20"
+	}
+}

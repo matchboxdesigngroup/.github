@@ -1,0 +1,27 @@
+// Matchbox default markdownlint config. The org lint workflow uses it when a
+// repository has no markdownlint config of its own.
+// Rules: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+{
+  "config": {
+    "default": true,
+    // Line length: we don't hard-wrap prose.
+    "MD013": false,
+    // Repeated headings are fine in different sections (e.g. "Usage" per item).
+    "MD024": { "siblings_only": true },
+    // Inline HTML that GitHub renders and our docs use.
+    "MD033": {
+      "allowed_elements": ["br", "details", "summary", "img", "kbd", "sub", "sup", "picture", "source"]
+    },
+    // Templates (PR, issue) commonly start with an h2.
+    "MD041": false
+  },
+  "ignores": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/wp-admin/**",
+    "**/wp-includes/**",
+    "**/wp-content/uploads/**",
+    "**/web/wp/**",
+    "**/CHANGELOG.md"
+  ]
+}

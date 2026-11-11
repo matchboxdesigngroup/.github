@@ -4,12 +4,15 @@
  * same way on a pull request: as warnings by default, or as errors for
  * error-level issues when fail-on-error is set (the same rule cs2pr follows for PHPCS).
  *
- * Usage: node annotate.mjs <eslint|stylelint|actionlint> <report.json> [--fail-on-error]
+ * Usage: node annotate.mjs <eslint|stylelint|actionlint|pint> <report.json> [--fail-on-error]
  *
  * Reads the linter's JSON report:
  *   eslint      eslint --format json
  *   stylelint   stylelint --formatter json
  *   actionlint  actionlint -format '{{json .}}'
+ *   pint        pint --test --format json (one issue per file, as Pint has no line numbers)
+ *
+ * Relative paths in a report are read from the current directory.
  *
  * Exit code: 0; 1 when --fail-on-error is set and an error-level issue was
  * found; 2 when the report is missing or unreadable (the linter itself failed).
@@ -41,7 +44,7 @@ export function annotate( issues, { tool, failOnError = false } ) {
 			errors++;
 		}
 		const properties = {
-			file: issue.file && path.isAbsolute( issue.file ) ? path.relative( workspace, issue.file ) : issue.file,
+			file: issue.file ? path.relative( workspace, path.resolve( issue.file ) ) : undefined,
 			line: issue.line,
 			endLine: issue.endLine,
 			col: issue.column,
@@ -87,7 +90,8 @@ const parsers = {
 			} ) )
 		),
 	actionlint: ( report ) =>
-		report.map( ( error ) => ( {
+		// actionlint prints nothing (or null) when there are no issues.
+		( report ?? [] ).map( ( error ) => ( {
 			file: error.filepath,
 			line: error.line,
 			column: error.column,
@@ -95,26 +99,38 @@ const parsers = {
 			severity: 'error',
 			message: error.message,
 		} ) ),
+	pint: ( report ) => {
+		if ( report?.tool !== 'pint' ) {
+			throw new Error( 'not a Pint JSON report' );
+		}
+		// Pint fixes whole files, so each file gets one issue listing the rules it breaks.
+		return ( report.files ?? [] ).map( ( file ) => ( {
+			file: file.path,
+			line: 1,
+			rule: file.fixers?.length === 1 ? file.fixers[ 0 ] : undefined,
+			severity: 'error',
+			message: `Code style doesn't match Pint (${ ( file.fixers ?? [] ).join( ', ' ) }). Run \`vendor/bin/pint\` to fix it.`,
+		} ) );
+	},
 };
 
 if ( process.argv[ 1 ] === fileURLToPath( import.meta.url ) ) {
 	const [ tool, reportFile, ...flags ] = process.argv.slice( 2 );
 	if ( ! parsers[ tool ] || ! reportFile ) {
-		console.error( 'Usage: node annotate.mjs <eslint|stylelint|actionlint> <report.json> [--fail-on-error]' );
+		console.error( 'Usage: node annotate.mjs <eslint|stylelint|actionlint|pint> <report.json> [--fail-on-error]' );
 		process.exit( 2 );
 	}
 
-	let report;
+	let issues;
 	try {
-		// actionlint prints nothing (or null) when there are no issues.
 		const text = readFileSync( reportFile, 'utf8' ).trim();
-		report = ( text ? JSON.parse( text ) : null ) ?? [];
+		issues = parsers[ tool ]( text ? JSON.parse( text ) : null );
 	} catch ( error ) {
 		console.log( `::warning title=${ escapeProperty( tool ) }::${ escapeData( `${ tool } didn't produce a report, so it may not have run. See the step log. (${ error.message })` ) }` );
 		process.exit( 2 );
 	}
 
-	process.exitCode = annotate( parsers[ tool ]( report ), {
+	process.exitCode = annotate( issues, {
 		tool,
 		failOnError: flags.includes( '--fail-on-error' ),
 	} );

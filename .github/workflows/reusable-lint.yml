@@ -5,11 +5,22 @@
 # whole minute, and each linter below only sets up its tools when the pull
 # request changed files it checks.
 #
-# - PHP: PHPCS with the full WordPress Coding Standards and PHPCompatibilityWP
-#   (modeled on WordPress core's reusable-coding-standards-php.yml), installed
-#   on its own from this repository's composer.json, so the project's Composer
-#   dependencies (premium plugins, private packages) are never installed. Uses
-#   the repository's phpcs config if it has one, else the MDG standard.
+# - PHP: depends on the stack, set with `php-standard`:
+#     auto       (default) whatever the project already has: PHPCS when it has a
+#                phpcs config, Pint when it has pint.json or requires laravel/pint.
+#                Nothing otherwise.
+#     wordpress  PHPCS with the MDG standard: the full WordPress Coding Standards
+#                and PHPCompatibilityWP (modeled on WordPress core's
+#                reusable-coding-standards-php.yml).
+#     sage       Pint (as Roots/Sage ships it) for code style, plus PHPCS with
+#                MDG-Sage for WordPress security and compatibility checks.
+#     laravel    Pint.
+#     none       no PHP checks.
+#   Each preset also runs what `auto` would, and a project's own phpcs config or
+#   pint.json always wins over the MDG defaults.
+#   PHPCS and Pint are installed on their own from this repository, so the
+#   project's Composer dependencies (premium plugins, private packages) are
+#   never installed. Blade templates (*.blade.php) are skipped.
 # - Markdown: markdownlint-cli2. Uses the repository's config if it has one,
 #   else standards/markdownlint/.markdownlint-cli2.jsonc.
 # - JavaScript / CSS: the repository's own `lint:js` / `lint:css` npm scripts
@@ -38,12 +49,16 @@ on:
         description: 'Regex of paths (relative to working-directory) to skip. Defaults to third-party plugins in a whole-site repo; set to an empty string to check them.'
         type: string
         default: '^wp-content/plugins/'
+      php-standard:
+        description: "PHP checks for the project's stack: 'auto', 'wordpress', 'sage', 'laravel' or 'none'. See the comment at the top of this file."
+        type: string
+        default: 'auto'
       php-version:
-        description: 'PHP version to run PHPCS with.'
+        description: 'PHP version to run PHPCS and Pint with.'
         type: string
         default: '8.3'
-      use-project-phpcs:
-        description: "Run `composer install` in working-directory and use the project's own PHPCS, for a project whose phpcs config needs standards beyond MDG. Needs every Composer dependency to install without credentials."
+      use-project-composer:
+        description: "Run `composer install` in working-directory and use the project's own PHPCS and Pint, for a project whose phpcs config needs standards beyond MDG or that pins its Pint version. Needs every Composer dependency to install without credentials."
         type: boolean
         default: false
       node-version:
@@ -111,6 +126,7 @@ jobs:
         env:
           SCOPE: ${{ inputs.scope }}
           EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
+          PHP_STANDARD: ${{ inputs.php-standard }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           JS_SCRIPT: ${{ inputs.js-script }}
           CSS_SCRIPT: ${{ inputs.css-script }}
@@ -121,10 +137,34 @@ jobs:
           changed_files="${RUNNER_TEMP}/mdg-standards/scripts/changed-files.sh"
           count_lines() { grep -c . "$1" || true; }
 
-          # PHP: paths relative to working-directory.
+          # PHP: paths relative to working-directory. Neither PHPCS nor Pint can check Blade templates.
           php_list="${RUNNER_TEMP}/php-files.txt"
-          bash "$changed_files" 'php' "$SCOPE" "$EXCLUDE_PATHS" > "$php_list"
+          bash "$changed_files" 'php' "$SCOPE" "$EXCLUDE_PATHS" | { grep -v '\.blade\.php$' || true; } > "$php_list"
           php_count="$(count_lines "$php_list")"
+
+          # Which PHP tools run, from php-standard and the project's own configs.
+          has_phpcs_config=false; has_pint=false
+          for name in .phpcs.xml phpcs.xml .phpcs.xml.dist phpcs.xml.dist; do
+            if [[ -f "$name" ]]; then has_phpcs_config=true; fi
+          done
+          if [[ -f pint.json ]] || { [[ -f composer.json ]] && jq -e '(.require // {}) + (."require-dev" // {}) | has("laravel/pint")' composer.json > /dev/null; }; then
+            has_pint=true
+          fi
+          phpcs=false; pint=false; phpcs_standard=""
+          case "$PHP_STANDARD" in
+            auto) phpcs="$has_phpcs_config"; pint="$has_pint" ;;
+            wordpress) phpcs=true; pint="$has_pint"; phpcs_standard=MDG ;;
+            sage) phpcs=true; pint=true; phpcs_standard=MDG-Sage ;;
+            laravel) phpcs="$has_phpcs_config"; pint=true ;;
+            none) ;;
+            *) echo "::error title=php-standard::Unknown php-standard '${PHP_STANDARD}'. Use auto, wordpress, sage, laravel or none."; exit 1 ;;
+          esac
+          # The project's phpcs config wins over the MDG standard.
+          if [[ "$has_phpcs_config" == "true" ]]; then phpcs_standard=""; fi
+          if [[ "$php_count" == "0" ]]; then phpcs=false; pint=false; fi
+          php_tools=""
+          if [[ "$phpcs" == "true" ]]; then php_tools="PHPCS (${phpcs_standard:-project config})"; fi
+          if [[ "$pint" == "true" ]]; then php_tools="${php_tools:+${php_tools} + }Pint"; fi
 
           # Markdown: paths relative to the repository root, where the action runs.
           prefix=""
@@ -161,6 +201,9 @@ jobs:
           {
             echo "php-count=${php_count}"
             echo "php-list=${php_list}"
+            echo "phpcs=${phpcs}"
+            echo "phpcs-standard=${phpcs_standard}"
+            echo "pint=${pint}"
             echo "md-count=${md_count}"
             echo "md-config=${md_config}"
             echo "md-list=${md_list}"
@@ -174,34 +217,41 @@ jobs:
             echo "### Files to lint"
             echo "| Check | Runs |"
             echo "| --- | --- |"
-            echo "| PHP | ${php_count} file(s) |"
+            if [[ -n "$php_tools" ]]; then
+              echo "| PHP: ${php_tools} | ${php_count} file(s) |"
+            else
+              echo "| PHP (\`php-standard: ${PHP_STANDARD}\`) | no check: $( [[ "$php_count" == "0" ]] && echo 'no files' || echo 'no PHP standard for this project' ) |"
+            fi
             echo "| Markdown | ${md_count} file(s) |"
             echo "| JavaScript (\`${JS_SCRIPT}\`) | ${js} |"
             echo "| CSS (\`${CSS_SCRIPT}\`) | ${css} |"
             echo "| Workflow files | ${workflows_count} file(s) |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "PHP: ${php_count}, Markdown: ${md_count}, JS: ${js}, CSS: ${css}, workflows: ${workflows_count}"
+          echo "PHP: ${php_count} (${php_tools:-not checked}), Markdown: ${md_count}, JS: ${js}, CSS: ${css}, workflows: ${workflows_count}"
 
       # ---- PHP ----
 
       - name: Set up PHP
-        if: steps.files.outputs.php-count != '0'
+        if: steps.files.outputs.phpcs == 'true' || steps.files.outputs.pint == 'true'
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ inputs.php-version }}
           coverage: none
           tools: composer, cs2pr
 
+      - name: Install project Composer dependencies
+        if: ${{ inputs.use-project-composer && (steps.files.outputs.phpcs == 'true' || steps.files.outputs.pint == 'true') }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
       - name: Install PHPCS
         id: install-phpcs
-        if: steps.files.outputs.php-count != '0'
+        if: steps.files.outputs.phpcs == 'true'
         env:
-          USE_PROJECT_PHPCS: ${{ inputs.use-project-phpcs }}
+          USE_PROJECT_COMPOSER: ${{ inputs.use-project-composer }}
         run: |
           mdg="${RUNNER_TEMP}/mdg-standards"
-          if [[ "$USE_PROJECT_PHPCS" == "true" ]]; then
-            echo "Using the project's PHPCS (use-project-phpcs)."
-            composer install --no-interaction --no-progress --prefer-dist
+          if [[ "$USE_PROJECT_COMPOSER" == "true" && -x vendor/bin/phpcs ]]; then
+            echo "Using the project's PHPCS (use-project-composer)."
             phpcs="${PWD}/vendor/bin/phpcs"
             # Register the MDG standard unless the project already installs it.
             if ! "$phpcs" -i | grep -qw MDG; then
@@ -220,13 +270,14 @@ jobs:
 
       - name: Run PHPCS
         id: phpcs
-        if: steps.files.outputs.php-count != '0'
+        if: steps.files.outputs.phpcs == 'true'
         # Lint issues never fail this step (see ignore_*_on_exit below); this only
         # keeps a PHPCS crash, such as a config error, from failing the build.
         continue-on-error: ${{ !inputs.fail-on-error }}
         env:
           PHPCS: ${{ steps.install-phpcs.outputs.phpcs }}
           FILE_LIST: ${{ steps.files.outputs.php-list }}
+          STANDARD: ${{ steps.files.outputs.phpcs-standard }}
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         run: |
           args=(
@@ -235,11 +286,11 @@ jobs:
             "--basepath=${GITHUB_WORKSPACE}"
           )
 
-          if [[ -f .phpcs.xml || -f phpcs.xml || -f .phpcs.xml.dist || -f phpcs.xml.dist ]]; then
-            echo "Using the project's phpcs config."
+          if [[ -n "$STANDARD" ]]; then
+            echo "No phpcs config found; using the ${STANDARD} standard."
+            args+=("--standard=${STANDARD}")
           else
-            echo "No phpcs config found; using the MDG standard."
-            args+=(--standard=MDG)
+            echo "Using the project's phpcs config."
           fi
 
           # Warnings never fail the build; errors only when fail-on-error is set.
@@ -268,6 +319,38 @@ jobs:
           else
             cs2pr --graceful-warnings --errors-as-warnings "$report"
           fi
+
+      - name: Run Pint
+        if: ${{ !cancelled() && steps.files.outputs.pint == 'true' }}
+        continue-on-error: ${{ !inputs.fail-on-error }}
+        env:
+          FILE_LIST: ${{ steps.files.outputs.php-list }}
+          USE_PROJECT_COMPOSER: ${{ inputs.use-project-composer }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          mdg="${RUNNER_TEMP}/mdg-standards"
+          if [[ "$USE_PROJECT_COMPOSER" == "true" && -x vendor/bin/pint ]]; then
+            echo "Using the project's Pint (use-project-composer)."
+            pint="${PWD}/vendor/bin/pint"
+          else
+            # Isolated from the project's Composer dependencies, which may need credentials.
+            composer --working-dir="${mdg}/scripts/pint" update --no-interaction --no-progress --prefer-dist
+            pint="${mdg}/scripts/pint/vendor/bin/pint"
+          fi
+          "$pint" --version
+
+          # Pint reads the project's pint.json if it has one, else its Laravel preset (as Sage ships).
+          # --test only reports; it exits 1 both for style issues and when it can't run,
+          # so annotate.mjs tells them apart by whether a report was written.
+          report="${RUNNER_TEMP}/pint.json"
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "$FILE_LIST"
+          "$pint" --test --format=json "${files[@]}" > "$report" || true
+          cat "$report"; echo
+
+          flags=()
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then flags+=(--fail-on-error); fi
+          node "${mdg}/scripts/annotate.mjs" pint "$report" "${flags[@]}"
 
       # ---- Markdown ----
       # markdownlint-cli2 runs through scripts/markdownlint so its issues are

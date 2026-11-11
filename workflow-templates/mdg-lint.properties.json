@@ -1,7 +1,7 @@
 {
   "name": "Matchbox Lint",
-  "description": "WordPress Coding Standards (PHPCS), markdownlint, ESLint/Stylelint and actionlint on pull requests, in one job.",
+  "description": "PHPCS or Pint for WordPress, Sage and Laravel, markdownlint, ESLint/Stylelint and actionlint on pull requests, in one job.",
   "iconName": "octicon checklist",
-  "categories": ["PHP", "JavaScript", "WordPress", "Code quality"],
+  "categories": ["PHP", "JavaScript", "TypeScript", "WordPress", "Laravel", "Code quality"],
   "filePatterns": ["composer\\.json$", "package\\.json$", "\\.php$", "style\\.css$"]
 }

@@ -1,8 +1,8 @@
 {
 	"name": "matchboxdesigngroup/coding-standards",
-	"description": "Matchbox Design Group coding standards: the MDG PHPCS standard (WordPress Coding Standards with PHP 8.1+ compatibility).",
+	"description": "Matchbox Design Group coding standards: the MDG PHPCS standards for WordPress (MDG) and Roots/Sage (MDG-Sage), with PHP 8.1+ compatibility.",
 	"type": "phpcodesniffer-standard",
-	"keywords": [ "phpcs", "wordpress", "standards" ],
+	"keywords": [ "phpcs", "wordpress", "sage", "standards" ],
 	"require": {
 		"wp-coding-standards/wpcs": "^3.1",
 		"phpcompatibility/phpcompatibility-wp": "^2.1"
